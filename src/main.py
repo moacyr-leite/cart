@@ -1,17 +1,21 @@
-from fastapi import FastAPI
-from sqlmodel import SQLModel
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from src.api.v1.api import api_router
-from src.database.session import engine
+from src.core.errors import AppException
 
-# Inicializa o FastAPI
 app = FastAPI(
     title="Cart API",
     description="Backend escalável estruturado com FastAPI e SQLModel",
-    version="1.0.0"
+    version="1.0.0",
 )
 
-SQLModel.metadata.create_all(engine)
+@app.exception_handler(AppException)
+async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.error.status_code,
+        content={"detail": exc.error.detail},
+    )
 
-# 🔌 Acopla o ecossistema de rotas versionadas da V1 (/api/v1/carts, /api/v1/products...)
+
 app.include_router(api_router, prefix="/api/v1")

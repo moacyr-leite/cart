@@ -18,30 +18,30 @@ def create_coupon(client, code="QUERO10", discount=Decimal("0.10")):
     assert response.status_code == 201
 
 
-def create_cart(client, cart_id=200):
-    response = client.post("/api/v1/carts/", json={"id": cart_id})
+def create_cart(client):
+    response = client.post("/api/v1/carts/")
     assert response.status_code == 201
-    return cart_id
+    return response.json()["id"]
 
 
 def test_full_shopping_cart_and_checkout_with_pix_discount(client):
     product_id = create_product(client)
     create_coupon(client)
-    create_cart(client)
+    cart_id = create_cart(client)
 
     add_response = client.post(
-        "/api/v1/carts/200/items",
+        f"/api/v1/carts/{cart_id}/items",
         json={"product_id": product_id, "amount": 1},
     )
     assert add_response.status_code == 201
 
     coupon_response = client.patch(
-        "/api/v1/carts/200/coupon", params={"coupon_code": "QUERO10"}
+        f"/api/v1/carts/{cart_id}/coupon", params={"coupon_code": "QUERO10"}
     )
     assert coupon_response.status_code == 200
 
     checkout_response = client.post(
-        "/api/v1/carts/200/checkout", params={"payment_method": "pix"}
+        f"/api/v1/carts/{cart_id}/checkout", params={"payment_method": "pix"}
     )
     assert checkout_response.status_code == 200
 
@@ -58,21 +58,24 @@ def test_full_shopping_cart_and_checkout_with_pix_discount(client):
 
     product = client.get(f"/api/v1/products/{product_id}").json()
     assert product["amount"] == 4
-    cart = client.get("/api/v1/carts/200").json()
+    cart = client.get(f"/api/v1/carts/{cart_id}").json()
     assert cart["itens"] == []
 
 
 def test_checkout_with_coupon_and_credit_card(client):
     product_id = create_product(client)
     create_coupon(client)
-    create_cart(client)
-    assert client.post(
-        "/api/v1/carts/200/items",
-        json={"product_id": product_id, "amount": 1},
-    ).status_code == 201
+    cart_id = create_cart(client)
+    assert (
+        client.post(
+            f"/api/v1/carts/{cart_id}/items",
+            json={"product_id": product_id, "amount": 1},
+        ).status_code
+        == 201
+    )
 
     response = client.post(
-        "/api/v1/carts/200/checkout",
+        f"/api/v1/carts/{cart_id}/checkout",
         params={"payment_method": "credit_card", "coupon_code": " quero10 "},
     )
 
@@ -86,22 +89,22 @@ def test_checkout_with_coupon_and_credit_card(client):
 
 def test_repeated_adds_are_combined_and_card_without_coupon_has_no_discount(client):
     product_id = create_product(client, amount=3)
-    create_cart(client)
+    cart_id = create_cart(client)
 
     for _ in range(2):
         response = client.post(
-            "/api/v1/carts/200/items",
+            f"/api/v1/carts/{cart_id}/items",
             json={"product_id": product_id, "amount": 1},
         )
         assert response.status_code == 201
 
-    cart = client.get("/api/v1/carts/200").json()
+    cart = client.get(f"/api/v1/carts/{cart_id}").json()
     assert len(cart["itens"]) == 1
     assert cart["itens"][0]["amount"] == 2
     assert client.get(f"/api/v1/products/{product_id}").json()["amount"] == 1
 
     checkout = client.post(
-        "/api/v1/carts/200/checkout",
+        f"/api/v1/carts/{cart_id}/checkout",
         params={"payment_method": "credit_card"},
     )
 
@@ -118,29 +121,30 @@ def test_repeated_adds_are_combined_and_card_without_coupon_has_no_discount(clie
 
 def test_invalid_coupon_does_not_complete_checkout(client):
     product_id = create_product(client, amount=2)
-    create_cart(client)
-    assert client.post(
-        "/api/v1/carts/200/items",
-        json={"product_id": product_id, "amount": 1},
-    ).status_code == 201
+    cart_id = create_cart(client)
+    assert (
+        client.post(
+            f"/api/v1/carts/{cart_id}/items",
+            json={"product_id": product_id, "amount": 1},
+        ).status_code
+        == 201
+    )
 
     response = client.post(
-        "/api/v1/carts/200/checkout",
+        f"/api/v1/carts/{cart_id}/checkout",
         params={"payment_method": "pix", "coupon_code": "INVALID"},
     )
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid or expired coupon."
     assert client.get(f"/api/v1/products/{product_id}").json()["amount"] == 1
-    assert len(client.get("/api/v1/carts/200").json()["itens"]) == 1
+    assert len(client.get(f"/api/v1/carts/{cart_id}").json()["itens"]) == 1
 
 
 def test_checkout_rejects_empty_cart(client):
-    create_cart(client)
+    cart_id = create_cart(client)
 
-    response = client.post(
-        "/api/v1/carts/200/checkout", params={"payment_method": "pix"}
-    )
+    response = client.post(f"/api/v1/carts/{cart_id}/checkout", params={"payment_method": "pix"})
 
     assert response.status_code == 422
     assert response.json()["detail"] == "Cannot checkout an empty cart."
@@ -149,14 +153,17 @@ def test_checkout_rejects_empty_cart(client):
 def test_checkout_rounds_discount_amounts_to_cents(client):
     product_id = create_product(client, price="0.05", amount=1)
     create_coupon(client, discount=Decimal("0.10"))
-    create_cart(client)
-    assert client.post(
-        "/api/v1/carts/200/items",
-        json={"product_id": product_id, "amount": 1},
-    ).status_code == 201
+    cart_id = create_cart(client)
+    assert (
+        client.post(
+            f"/api/v1/carts/{cart_id}/items",
+            json={"product_id": product_id, "amount": 1},
+        ).status_code
+        == 201
+    )
 
     response = client.post(
-        "/api/v1/carts/200/checkout",
+        f"/api/v1/carts/{cart_id}/checkout",
         params={"payment_method": "credit_card", "coupon_code": "QUERO10"},
     )
 
@@ -166,12 +173,9 @@ def test_checkout_rounds_discount_amounts_to_cents(client):
     assert receipt["coupon_discount"] == "0.01"
     assert receipt["payment_discount"] == "0.00"
     assert receipt["total"] == "0.04"
-    assert (
-        Decimal(receipt["subtotal"])
-        - Decimal(receipt["coupon_discount"])
-        - Decimal(receipt["payment_discount"])
-        == Decimal(receipt["total"])
-    )
+    assert Decimal(receipt["subtotal"]) - Decimal(receipt["coupon_discount"]) - Decimal(
+        receipt["payment_discount"]
+    ) == Decimal(receipt["total"])
 
 
 def test_coupon_codes_are_normalized_and_duplicates_are_rejected(client):
@@ -196,3 +200,12 @@ def test_coupon_discount_must_be_between_zero_and_one(client):
             json={"code": "INVALID", "discount": discount},
         )
         assert response.status_code == 422
+
+
+def test_coupon_code_cannot_be_blank(client):
+    response = client.post(
+        "/api/v1/coupons/",
+        json={"code": "   ", "discount": "0.10"},
+    )
+
+    assert response.status_code == 422
